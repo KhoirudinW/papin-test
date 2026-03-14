@@ -1,0 +1,13 @@
+import AdminDashboardClient from "@/components/AdminDashboardClient";
+import TestNavbar from "@/components/TestNavbar";
+
+export default function AdminPage() {
+  return (
+    <div className="pb-12">
+      <TestNavbar />
+      <main className="pt-24 md:pt-28">
+        <AdminDashboardClient />
+      </main>
+    </div>
+  );
+}

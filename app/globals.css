@@ -1,0 +1,81 @@
+@import "tailwindcss";
+
+:root {
+  --font-family-primary: "Poppins", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --color-primary: #ffafcc;
+  --color-primary-hovered: #fa83ae;
+  --color-secondary: #ffc8dd;
+  --color-cream: #fff5ee;
+  --color-soft-cream: #fffdfb;
+  --color-gray: #535252;
+  --color-white: #ffffff;
+  --color-light-blue: #a2d2ff;
+  --color-shadow: rgba(0, 0, 0, 0.2);
+}
+
+@theme {
+  --color-primary: #ffafcc;
+  --color-primary-hovered: #fa83ae;
+  --color-secondary: #ffc8dd;
+  --color-cream: #fff5ee;
+  --color-soft-cream: #fffdfb;
+  --color-light-blue: #a2d2ff;
+}
+
+html {
+  font-family: var(--font-family-primary);
+  scroll-behavior: smooth;
+}
+
+body {
+  min-height: 100vh;
+  color: #222;
+  background:
+    radial-gradient(1200px 500px at 10% -10%, rgba(255, 175, 204, 0.5), transparent 60%),
+    radial-gradient(900px 450px at 100% 0%, rgba(162, 210, 255, 0.45), transparent 55%),
+    linear-gradient(180deg, #fffdfb 0%, #fff6fb 100%);
+}
+
+.btn {
+  border-radius: 12px;
+  padding: 12px 20px;
+  font-size: 14px;
+  font-weight: 700;
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease,
+    background-color 0.2s ease;
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.btn-primary-solid {
+  background-color: var(--color-primary);
+  color: #fff;
+  box-shadow: 0 4px 0 rgba(250, 131, 174, 0.45);
+}
+
+.btn-primary-solid:hover {
+  background-color: var(--color-primary-hovered);
+}
+
+.btn-secondary-stroke {
+  border: 2px solid var(--color-secondary);
+  color: #c85480;
+  background-color: #fff;
+  box-shadow: 0 4px 0 rgba(255, 200, 221, 0.5);
+}
+
+.btn-secondary-stroke:hover {
+  background-color: #fff8fb;
+}
+
+.card-primary {
+  border: 1px solid rgba(255, 175, 204, 0.45);
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.95), rgba(255, 245, 251, 0.92));
+  border-radius: 20px;
+  box-shadow: 0 20px 40px -28px rgba(255, 131, 174, 0.65);
+}
