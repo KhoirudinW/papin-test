@@ -1,13 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { AlertCircle } from "lucide-react";
 import { useAuthSession } from "@/hooks/useAuthSession";
 
-export default function LoginClient() {
+export default function LoginClient({ nextHref = "/" }: { nextHref?: string }) {
   const router = useRouter();
-  const params = useSearchParams();
   const { loginWithPassword } = useAuthSession();
 
   const [email, setEmail] = useState("");
@@ -15,14 +14,12 @@ export default function LoginClient() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const next = params.get("next") || "/";
-
   const handleLogin = async () => {
     setError("");
     setLoading(true);
     try {
       await loginWithPassword(email, password);
-      router.push(next);
+      router.push(nextHref);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Login gagal.";
       setError(message);

@@ -24,11 +24,15 @@ export const getCatalogPromoSnapshot = (now = new Date()): CatalogPromoSnapshot 
 
   const startAt = toValidDate(configuredStartAt);
   const endAt = toValidDate(configuredEndAt);
+  const startTime = startAt?.getTime() ?? null;
+  const endTime = endAt?.getTime() ?? null;
+  const nowTime = now.getTime();
 
   const active =
-    Boolean(startAt && endAt) &&
-    now.getTime() >= startAt.getTime() &&
-    now.getTime() <= endAt.getTime();
+    startTime !== null &&
+    endTime !== null &&
+    nowTime >= startTime &&
+    nowTime <= endTime;
 
   return {
     active,
