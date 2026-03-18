@@ -1,9 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowRight, Lock, ShieldCheck, Sparkles } from "lucide-react";
+import { ArrowRight, Clock, Lock, ShieldCheck, Sparkles } from "lucide-react";
 import { type AccessState } from "@/data/testsCatalog";
 import { useTestsCatalog } from "@/hooks/useTestsCatalog";
+import { useState } from "react";
+import TestHistoryDashboard from "@/components/TestHistoryDashboard";
+import { useAuthSession } from "@/hooks/useAuthSession";
 
 const badgeByAccess: Record<AccessState, string> = {
   free: "Free",
@@ -40,6 +43,9 @@ const formatPromoDate = (value: string | null) => {
 
 export default function MainMenuClient() {
   const { tests, promo, loading, error } = useTestsCatalog();
+  const { isLoggedIn } = useAuthSession();
+  const [activeTab, setActiveTab] = useState<"library" | "history">("library");
+  
   const promoEndLabel = formatPromoDate(promo.endAt);
 
   return (
@@ -55,13 +61,47 @@ export default function MainMenuClient() {
             </p>
           </div>
 
-          <Link href="/pricing" className="btn btn-primary-solid inline-flex items-center gap-2">
-            Promo & Pricing
-            <ArrowRight size={14} />
-          </Link>
+          <div className="flex flex-wrap items-center gap-2">
+            <Link href="/pricing" className="btn btn-primary-solid inline-flex items-center gap-2">
+              Promo & Pricing
+              <ArrowRight size={14} />
+            </Link>
+          </div>
         </div>
 
-        {promo.active && (
+        {isLoggedIn && (
+          <div className="mt-8 flex gap-2 rounded-2xl bg-gray-50 p-1.5 md:w-fit">
+            <button
+              onClick={() => setActiveTab("library")}
+              className={`flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-black transition ${
+                activeTab === "library"
+                  ? "bg-white text-primary shadow-sm"
+                  : "text-[#888] hover:text-[#444]"
+              }`}
+            >
+              <ShieldCheck size={18} />
+              Test Library
+              <span className="ml-1 rounded-md bg-primary/10 px-1.5 py-0.5 text-[10px]">
+                {tests.length}
+              </span>
+            </button>
+            <button
+              onClick={() => setActiveTab("history")}
+              className={`flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-black transition ${
+                activeTab === "history"
+                  ? "bg-white text-primary shadow-sm"
+                  : "text-[#888] hover:text-[#444]"
+              }`}
+            >
+              <Clock size={18} />
+              Riwayat Test
+            </button>
+          </div>
+        )}
+
+        {activeTab === "library" ? (
+          <>
+            {promo.active && (
           <div className="mt-6 rounded-[1.75rem] border border-green-200 bg-green-50 p-5">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
@@ -151,6 +191,12 @@ export default function MainMenuClient() {
             );
           })}
         </div>
+      </>
+      ) : (
+        <div className="mt-8">
+          <TestHistoryDashboard />
+        </div>
+      )}
       </div>
     </section>
   );

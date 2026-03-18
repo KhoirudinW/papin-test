@@ -7,6 +7,8 @@ export type AuthProfile = {
   email: string | null;
   full_name: string | null;
   name: string | null;
+  role: string | null;
+  is_admin: boolean;
 };
 
 const extractBearerToken = (request: Request): string | null => {
@@ -41,7 +43,7 @@ export const getAuthProfileFromRequest = async (request: Request): Promise<AuthP
 
   const { data: profile, error: profileError } = await supabaseAdmin
     .from("user_profiles")
-    .select("id, pair_id, auth_user_id, email, full_name, name")
+    .select("id, pair_id, auth_user_id, email, full_name, name, role")
     .eq("auth_user_id", user.id)
     .limit(1)
     .maybeSingle();
@@ -50,5 +52,13 @@ export const getAuthProfileFromRequest = async (request: Request): Promise<AuthP
     return null;
   }
 
-  return profile as AuthProfile;
+  // Cek apakah user terdaftar sebagai admin PAPin Test
+  const { data: adminRow } = await supabaseAdmin
+    .from("test_admins")
+    .select("id")
+    .eq("profile_id", profile.id)
+    .limit(1)
+    .maybeSingle();
+
+  return { ...(profile as Omit<AuthProfile, "is_admin">), is_admin: Boolean(adminRow?.id) };
 };

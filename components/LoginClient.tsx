@@ -1,24 +1,42 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { AlertCircle } from "lucide-react";
+import { AlertCircle, Eye, EyeOff } from "lucide-react";
 import { useAuthSession } from "@/hooks/useAuthSession";
 
 export default function LoginClient({ nextHref = "/" }: { nextHref?: string }) {
   const router = useRouter();
-  const { loginWithPassword } = useAuthSession();
+  const { loginWithPassword, loginWithPairCode, isLoggedIn } = useAuthSession();
 
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  useEffect(() => {
+    if (isLoggedIn) {
+      router.replace(nextHref);
+    }
+  }, [isLoggedIn, router, nextHref]);
+
+  const [inputType, setInputType] = useState<"password" | "paircode">("password");
+  const [showSecret, setShowSecret] = useState(false);
+  const [identifier, setIdentifier] = useState("");
+  const [secret, setSecret] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   const handleLogin = async () => {
+    if (!identifier || !secret) {
+      setError("Harap isi semua field.");
+      return;
+    }
+
     setError("");
     setLoading(true);
+
     try {
-      await loginWithPassword(email, password);
+      if (inputType === "password") {
+        await loginWithPassword(identifier, secret);
+      } else {
+        await loginWithPairCode(identifier, secret);
+      }
       router.push(nextHref);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Login gagal.";
@@ -39,24 +57,50 @@ export default function LoginClient({ nextHref = "/" }: { nextHref?: string }) {
 
         <div className="mt-6 space-y-3">
           <div>
-            <label className="mb-1 block text-xs font-black uppercase tracking-wider text-[#666]">Email</label>
+            <label className="mb-1 block text-xs font-black uppercase tracking-wider text-[#666]">
+              {inputType === "password" ? "Email atau Username" : "Username"}
+            </label>
             <input
-              type="email"
+              type={inputType === "password" ? "text" : "text"}
               className="w-full rounded-xl border border-primary/20 px-3 py-3 outline-none focus:border-primary"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              placeholder="you@email.com"
+              value={identifier}
+              onChange={(event) => setIdentifier(event.target.value.toLowerCase().trim())}
+              placeholder={inputType === "password" ? "you@email.com atau username" : "Username kamu"}
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-black uppercase tracking-wider text-[#666]">Password</label>
-            <input
-              type="password"
-              className="w-full rounded-xl border border-primary/20 px-3 py-3 outline-none focus:border-primary"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              placeholder="Masukkan password"
-            />
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-xs font-black uppercase tracking-wider text-[#666]">
+                {inputType === "password" ? "Password" : "Paircode"}
+              </label>
+              <button
+                type="button"
+                onClick={() => {
+                  setInputType(inputType === "password" ? "paircode" : "password");
+                  setSecret(""); // reset secret when switching modes
+                }}
+                className="text-xs font-bold text-primary hover:underline"
+              >
+                Gunakan {inputType === "password" ? "Paircode" : "Password"}
+              </button>
+            </div>
+            <div className="relative">
+              <input
+                type={showSecret ? "text" : "password"}
+                className="w-full rounded-xl border border-primary/20 pl-3 pr-10 py-3 outline-none focus:border-primary font-medium tracking-wide"
+                value={secret}
+                onChange={(event) => setSecret(event.target.value)}
+                placeholder={inputType === "password" ? "Masukkan password" : "KODE-RAHASIA"}
+              />
+              <button
+                type="button"
+                onClick={() => setShowSecret(!showSecret)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-primary transition-colors"
+                tabIndex={-1}
+              >
+                {showSecret ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
+            </div>
           </div>
         </div>
 

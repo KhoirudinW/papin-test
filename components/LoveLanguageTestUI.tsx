@@ -1,65 +1,93 @@
 "use client";
 
-import Link from "next/link";
-import { useMemo, useState } from "react";
-import { AlertTriangle, ArrowLeft, Check, ChevronLeft, ChevronRight, HeartHandshake } from "lucide-react";
+import { useMemo, useRef, useState, useEffect } from "react";
+import { useRouter, usePathname } from "next/navigation";
 import {
-  attachmentDimensionDescriptions,
-  attachmentDimensionLabels,
+  AlertTriangle,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  ClipboardCheck,
+  Share2,
+  Info,
+  AlertCircle,
+  UserPlus,
+  Database,
+} from "lucide-react";
+import ShareResultCard, { type ShareCardData } from "@/components/ShareResultCard";
+import { useAuthSession } from "@/hooks/useAuthSession";
+import { getAuthHeader } from "@/lib/clientAuth";
+import {
+  attachmentVariantMeta,
   attachmentQuestions,
   attachmentStyleSummaries,
-  attachmentVariantMeta,
+  attachmentDimensionDescriptions,
   scaleOptions,
-  type AttachmentDimension,
   type AttachmentStyle,
   type AttachmentTestVariant,
+  type AttachmentDimension,
 } from "@/data/attachmentQuestions";
 
 type AnswerMap = Record<number, number>;
 type AnswersByVariant = Record<AttachmentTestVariant, AnswerMap>;
 
-const HIGH_THRESHOLD = 3.25;
+type ScoreCard = {
+  dimension: AttachmentDimension;
+  label: string;
+  total: number;
+  answeredItems: number;
+  itemIds: number[];
+  avg: number;
+  pct: number;
+  level: string;
+};
 
-function normalizeScore(value: number, reverse?: boolean): number {
-  return reverse ? 6 - value : value;
-}
+const dimensionMeta: Record<AttachmentDimension, { label: string }> = {
+  anxiety: { label: "Kecemasan (Anxiety)" },
+  avoidance: { label: "Penghindaran (Avoidance)" },
+};
 
-function getLevelLabel(avg: number): string {
-  if (avg < 2.5) {
-    return "Rendah";
-  }
-  if (avg < 3.5) {
-    return "Sedang";
-  }
+function getLevelLabel(avg: number) {
+  if (avg <= 2.2) return "Rendah";
+  if (avg <= 3.7) return "Sedang";
   return "Tinggi";
 }
 
-function getAttachmentStyle(anxietyAvg: number, avoidanceAvg: number): AttachmentStyle {
-  const anxietyHigh = anxietyAvg >= HIGH_THRESHOLD;
-  const avoidanceHigh = avoidanceAvg >= HIGH_THRESHOLD;
+function calculateStyle(scoreCards: ScoreCard[]): AttachmentStyle {
+  const anxiety = scoreCards.find((c) => c.dimension === "anxiety");
+  const avoidance = scoreCards.find((c) => c.dimension === "avoidance");
 
-  if (anxietyHigh && avoidanceHigh) {
-    return "fearful";
-  }
-  if (anxietyHigh) {
-    return "anxious";
-  }
-  if (avoidanceHigh) {
-    return "avoidant";
-  }
-  return "secure";
+  if (!anxiety || !avoidance) return "secure";
+
+  const isAnxietyHigh = anxiety.avg > 3.0;
+  const isAvoidanceHigh = avoidance.avg > 3.0;
+
+  if (!isAnxietyHigh && !isAvoidanceHigh) return "secure";
+  if (isAnxietyHigh && !isAvoidanceHigh) return "anxious";
+  if (!isAnxietyHigh && isAvoidanceHigh) return "avoidant";
+  return "fearful";
 }
 
 export default function AttachmentReflectionUI({
   initialVariant = "lite",
   fixedVariant = false,
+  resultId,
 }: {
   initialVariant?: AttachmentTestVariant;
   fixedVariant?: boolean;
+  resultId?: string;
 }) {
   const [activeStep, setActiveStep] = useState(0);
   const [testVariant, setTestVariant] = useState<AttachmentTestVariant>(initialVariant);
   const [answersByVariant, setAnswersByVariant] = useState<AnswersByVariant>({ lite: {}, pro: {} });
+  const [showShareCard, setShowShareCard] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isHistoryLoading, setIsHistoryLoading] = useState(false);
+  const router = useRouter();
+  const pathname = usePathname();
+  const { isLoggedIn } = useAuthSession();
+  // Flag: cegah save lebih dari sekali per sesi tes
+  const hasSynced = useRef(false);
 
   const variantMeta = attachmentVariantMeta[testVariant];
   const answers = answersByVariant[testVariant];
@@ -67,69 +95,213 @@ export default function AttachmentReflectionUI({
   const steps = useMemo(
     () =>
       [
-        { id: "instructions", title: "Petunjuk", description: `Mode ${variantMeta.label} dan skala jawaban` },
+        { id: "instructions", title: "Petunjuk", description: `Mode ${variantMeta.label} dan refleksi diri` },
         { id: "questions", title: `${variantMeta.questionCount} Soal`, description: `${variantMeta.purpose}` },
-        { id: "results", title: "Hasil", description: "Highlight attachment style dan insight singkat" },
+        { id: "results", title: "Hasil", description: "Analisis gaya kelekatan (Attachment Style)" },
       ] as const,
     [variantMeta.label, variantMeta.purpose, variantMeta.questionCount],
   );
 
   const currentQuestions = useMemo(
-    () => attachmentQuestions.filter((question) => question.tier === testVariant),
+    () => attachmentQuestions.filter((q) => q.tier === testVariant),
     [testVariant],
   );
 
-  const answeredCount = Object.keys(answers).length;
-
-  const scoringMap = useMemo(() => {
-    return {
-      anxiety: currentQuestions.filter((question) => question.dimension === "anxiety"),
-      avoidance: currentQuestions.filter((question) => question.dimension === "avoidance"),
-    } satisfies Record<AttachmentDimension, (typeof attachmentQuestions)[number][]>;
-  }, [currentQuestions]);
+  const answeredCount = Object.keys(answers || {}).length;
+  const isResultsStep = activeStep === 2;
 
   const scoreCards = useMemo(() => {
-    return (Object.keys(scoringMap) as AttachmentDimension[]).map((dimension) => {
-      const questions = scoringMap[dimension];
-      const answeredItems = questions.filter((question) => answers[question.id] !== undefined);
-      const normalizedTotal = answeredItems.reduce(
-        (sum, question) => sum + normalizeScore(answers[question.id] ?? 0, question.reverse),
-        0,
-      );
-      const itemCount = answeredItems.length;
-      const avg = itemCount ? normalizedTotal / itemCount : 0;
-      const pct = itemCount ? Math.round((normalizedTotal / (itemCount * 5)) * 100) : 0;
+    const safeAnswers = answers || {};
+    return (["anxiety", "avoidance"] as const).map((dim) => {
+      const questions = currentQuestions.filter((q) => q.dimension === dim);
+      const total = questions.reduce((sum, q) => sum + (safeAnswers[q.id] ?? 0), 0);
+      const answeredItems = questions.filter((q) => safeAnswers[q.id] !== undefined).length;
+      const avg = answeredItems > 0 ? total / answeredItems : 0;
 
       return {
-        dimension,
-        label: attachmentDimensionLabels[dimension],
-        total: normalizedTotal,
-        answeredItems: itemCount,
-        itemIds: questions.map((question) => question.id),
+        dimension: dim,
+        label: dimensionMeta[dim].label,
+        total,
+        answeredItems,
+        itemIds: questions.map((q) => q.id),
         avg,
-        pct,
+        pct: Math.round((avg / 5) * 100),
         level: getLevelLabel(avg),
       };
     });
-  }, [answers, scoringMap]);
+  }, [answers, currentQuestions]);
 
-  const anxietyCard = scoreCards.find((card) => card.dimension === "anxiety") ?? null;
-  const avoidanceCard = scoreCards.find((card) => card.dimension === "avoidance") ?? null;
+  const attachmentStyle = calculateStyle(scoreCards);
+  const styleResult = attachmentStyleSummaries[attachmentStyle]
+    ? { ...attachmentStyleSummaries[attachmentStyle], style: attachmentStyle }
+    : null;
 
-  const styleResult = useMemo(() => {
-    if (!anxietyCard || !avoidanceCard || answeredCount === 0) {
-      return null;
+  // ── Persistence: Load results on mount ──────────────────────────
+  useEffect(() => {
+    // If we have a resultId, don't auto-restore from localStorage
+    if (resultId) return;
+
+    const storageKey = `papin_res_att_v2`;
+    const saved = localStorage.getItem(storageKey);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed.answersByVariant && typeof parsed.answersByVariant === 'object') {
+          const loaded = parsed.answersByVariant;
+          // Ensure both variants exist with valid objects
+          setAnswersByVariant({
+            lite: loaded.lite && typeof loaded.lite === 'object' ? loaded.lite : {},
+            pro: loaded.pro && typeof loaded.pro === 'object' ? loaded.pro : {},
+          });
+
+          const recoveredAnswers = loaded[testVariant] || {};
+          const recoveredCount = Object.keys(recoveredAnswers).length;
+          if (recoveredCount >= variantMeta.questionCount) {
+             setActiveStep(2);
+          }
+        }
+      } catch (e) {
+        console.error("Failed to restore Attachment answers:", e);
+      }
     }
+  }, [testVariant, variantMeta.questionCount]);
 
-    const style = getAttachmentStyle(anxietyCard.avg, avoidanceCard.avg);
-    return {
-      style,
-      ...attachmentStyleSummaries[style],
+  // ── Persistence: Save answers when they change ──────────────────
+  useEffect(() => {
+    if (Object.keys(answersByVariant.lite).length > 0 || Object.keys(answersByVariant.pro).length > 0) {
+      const storageKey = `papin_res_att_v2`;
+      localStorage.setItem(storageKey, JSON.stringify({ answersByVariant, updatedAt: Date.now() }));
+    }
+  }, [answersByVariant]);
+
+  // Reset flag sync tiap ganti variant
+  useEffect(() => {
+    hasSynced.current = false;
+  }, [testVariant]);
+
+  // ── Sync to Database on Completion ─────────────────────────────
+  useEffect(() => {
+    const syncResult = async () => {
+      if (resultId) return;                    // Sedang buka history, jangan simpan
+      if (hasSynced.current) return;           // Sudah pernah disimpan untuk sesi ini
+      if (activeStep !== 2) return;            // Belum di halaman hasil
+      if (!isLoggedIn) return;                 // Belum login
+      const currentAnswers = answersByVariant[testVariant];
+      if (Object.keys(currentAnswers || {}).length < variantMeta.questionCount) return; // Belum selesai
+
+      hasSynced.current = true; // Pasang flag SEBELUM async agar tidak double-fire
+      setIsSaving(true);
+      try {
+        const authHeaders = await getAuthHeader();
+        await fetch("/api/tests/results", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...authHeaders },
+          body: JSON.stringify({
+            test_slug: `attachment-${testVariant}`,
+            variant: testVariant,
+            score_data: {
+              style: styleResult?.style,
+              label: styleResult?.label,
+              scores: scoreCards.map(c => ({ dimension: c.dimension, avg: c.avg, level: c.level }))
+            },
+            answers: currentAnswers
+          }),
+        });
+      } catch (e) {
+        hasSynced.current = false; // Reset agar bisa retry jika gagal
+        console.error("Failed to sync Attachment result to DB:", e);
+      } finally {
+        setIsSaving(false);
+      }
     };
-  }, [anxietyCard, avoidanceCard, answeredCount]);
+
+    void syncResult();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeStep, isLoggedIn, testVariant]);
+
+  // ── Load Historical Result ─────────────────────────────────────
+  useEffect(() => {
+    const loadHistory = async () => {
+      if (!resultId) return;
+      
+      setIsHistoryLoading(true);
+      try {
+        const authHeaders = await getAuthHeader();
+        const response = await fetch("/api/tests/results", { headers: authHeaders });
+        if (!response.ok) throw new Error();
+        const data = await response.json();
+        const result = (data.results || []).find((r: any) => r.id === resultId);
+        
+        if (result) {
+          if (result.variant) {
+            setTestVariant(result.variant as AttachmentTestVariant);
+          }
+          if (result.answers) {
+            setAnswersByVariant((prev) => ({
+              ...prev,
+              [result.variant || "lite"]: result.answers
+            }));
+          }
+          setActiveStep(2); // Direct to results
+        }
+      } catch (e) {
+        console.error("Failed to load historical result:", e);
+      } finally {
+        setIsHistoryLoading(false);
+      }
+    };
+    
+    void loadHistory();
+  }, [resultId]);
+
+  const shareCardData: ShareCardData | null = styleResult && isResultsStep
+    ? {
+        testName: "Attachment Reflection",
+        variant: testVariant === "lite" ? "Lite" : "Pro",
+        primaryLabel: styleResult.label,
+        profileType: styleResult.label,
+        profileDescription: styleResult.shortDescription,
+        tendencyText: styleResult.tendency,
+        signs: styleResult.traits.slice(0, 3),
+        positiveTriggers: styleResult.pros.slice(0, 3),
+        positiveTriggerLabel: "Kelebihanmu",
+      }
+    : null;
+
+  const handleReset = () => {
+    if (confirm("Hapus hasil refleksi ini dan mengulang dari awal?")) {
+      const storageKey = `papin_res_att_v2`;
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          delete parsed.answersByVariant[testVariant];
+          localStorage.setItem(storageKey, JSON.stringify(parsed));
+        } catch (e) {}
+      }
+      setAnswersByVariant((prev) => ({ ...prev, [testVariant]: {} }));
+      setActiveStep(0);
+    }
+  };
 
   const isFirstStep = activeStep === 0;
   const isLastStep = activeStep === steps.length - 1;
+
+  const handleNext = () => {
+    setActiveStep((prev) => (isLastStep ? 0 : prev + 1));
+  };
+
+  if (isHistoryLoading) {
+    return (
+      <section className="mx-auto w-full max-w-6xl px-4 md:px-8">
+        <div className="card-primary flex flex-col items-center justify-center p-24 text-[#888]">
+          <Database className="animate-pulse mb-4 text-primary" size={48} />
+          <h2 className="text-xl font-black text-[#444]">Memuat Hasilmu...</h2>
+          <p className="text-xs font-medium uppercase tracking-[0.2em] text-[#bbb]">Syncing with database</p>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="mx-auto w-full max-w-6xl px-4 md:px-8">
@@ -151,24 +323,22 @@ export default function AttachmentReflectionUI({
               answers={answers}
               questions={currentQuestions}
               testVariant={testVariant}
-              onPick={(questionId, value) =>
+              onPick={(id, val) =>
                 setAnswersByVariant((prev) => ({
                   ...prev,
-                  [testVariant]: {
-                    ...prev[testVariant],
-                    [questionId]: value,
-                  },
+                  [testVariant]: { ...prev[testVariant], [id]: val },
                 }))
               }
             />
           )}
-          {activeStep === 2 && (
+          {isResultsStep && (
             <ResultPanel
               answeredCount={answeredCount}
               testVariant={testVariant}
               scoreCards={scoreCards}
               styleResult={styleResult}
               totalQuestionCount={currentQuestions.length}
+              setShowShareCard={setShowShareCard}
             />
           )}
         </div>
@@ -184,16 +354,51 @@ export default function AttachmentReflectionUI({
             Sebelumnya
           </button>
 
-          <button
-            type="button"
-            onClick={() => setActiveStep((prev) => (isLastStep ? 0 : prev + 1))}
-            className="btn btn-primary-solid inline-flex items-center gap-2"
-          >
-            {isLastStep ? "Ulang dari awal" : "Lanjut"}
-            {!isLastStep && <ChevronRight size={16} />}
-          </button>
+          <div className="flex items-center gap-2">
+            {isResultsStep ? (
+              <>
+                <button
+                  type="button"
+                  onClick={handleReset}
+                  className="btn btn-secondary-stroke inline-flex items-center gap-2"
+                >
+                  Reset
+                </button>
+                {!isLoggedIn && (
+                  <button
+                    type="button"
+                    onClick={() => router.push(`/register?next=${encodeURIComponent(pathname)}`)}
+                    className="btn btn-secondary-stroke inline-flex items-center gap-2 border-primary/20 bg-primary/5 text-primary hover:bg-primary/10"
+                  >
+                    <UserPlus size={16} />
+                    Daftar
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setShowShareCard(true)}
+                  className="btn btn-primary-solid inline-flex items-center gap-2"
+                >
+                  <Share2 size={16} />
+                  Share ke IG
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={handleNext}
+                className="btn btn-primary-solid inline-flex items-center gap-2"
+              >
+                Lanjut
+                <ChevronRight size={16} />
+              </button>
+            )}
+          </div>
         </div>
       </div>
+      {showShareCard && shareCardData && (
+        <ShareResultCard data={shareCardData} onClose={() => setShowShareCard(false)} />
+      )}
     </section>
   );
 }
@@ -206,56 +411,28 @@ function StepHeader({
   steps: readonly { id: string; title: string; description: string }[];
 }) {
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <span className="rounded-full bg-primary/20 p-2 text-primary">
-            <HeartHandshake size={18} />
-          </span>
-          <div>
-            <p className="text-xs font-black uppercase tracking-[0.18em] text-primary">Attachment Reflection</p>
-            <h1 className="text-2xl font-black text-[#434343] md:text-3xl">
-              Tes Refleksi Attachment Style
-            </h1>
-          </div>
-        </div>
-
-        <Link href="/" className="btn btn-secondary-stroke inline-flex items-center gap-2">
-          <ArrowLeft size={14} />
-          Main Menu
-        </Link>
-      </div>
-
-      <div className="grid gap-2 md:grid-cols-3">
-        {steps.map((step, index) => {
-          const isActive = index === activeStep;
-          const isComplete = index < activeStep;
-
-          return (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center gap-2">
+        {steps.map((step, idx) => (
+          <div key={step.id} className="flex items-center gap-2">
             <div
-              key={step.id}
-              className={`rounded-2xl border px-3 py-3 transition ${
-                isActive
-                  ? "border-primary bg-primary/10"
-                  : isComplete
-                    ? "border-primary/50 bg-[#fff8fc]"
-                    : "border-primary/20 bg-white"
+              className={`flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-black transition-all ${
+                activeStep === idx
+                  ? "bg-primary text-white scale-110 shadow-sm"
+                  : activeStep > idx
+                    ? "bg-green-100 text-green-600"
+                    : "bg-gray-100 text-gray-400"
               }`}
             >
-              <div className="flex items-center gap-2">
-                <div
-                  className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-black ${
-                    isActive || isComplete ? "bg-primary text-white" : "bg-gray-100 text-gray-500"
-                  }`}
-                >
-                  {isComplete ? <Check size={12} /> : index + 1}
-                </div>
-                <p className="text-xs font-black uppercase tracking-wider text-[#4b4b4b]">{step.title}</p>
-              </div>
-              <p className="mt-1 text-[11px] text-[#666]">{step.description}</p>
+              {activeStep > idx ? <Check size={12} /> : idx + 1}
             </div>
-          );
-        })}
+            {idx < steps.length - 1 && <div className="h-0.5 w-4 bg-gray-100" />}
+          </div>
+        ))}
+      </div>
+      <div className="mt-2">
+        <h3 className="text-xl font-black text-[#444]">{steps[activeStep].title}</h3>
+        <p className="text-xs font-bold text-[#888]">{steps[activeStep].description}</p>
       </div>
     </div>
   );
@@ -267,96 +444,61 @@ function VariantSwitcher({
   onResetStep,
 }: {
   activeVariant: AttachmentTestVariant;
-  onChange: (variant: AttachmentTestVariant) => void;
+  onChange: (v: AttachmentTestVariant) => void;
   onResetStep: () => void;
 }) {
   return (
-    <div className="mt-6 grid gap-3 md:grid-cols-2">
-      {(Object.keys(attachmentVariantMeta) as AttachmentTestVariant[]).map((variant) => {
-        const meta = attachmentVariantMeta[variant];
-        const isActive = variant === activeVariant;
-
-        return (
-          <button
-            key={variant}
-            type="button"
-            onClick={() => {
-              onChange(variant);
-              onResetStep();
-            }}
-            className={`rounded-[1.75rem] border p-4 text-left transition ${
-              isActive
-                ? "border-primary bg-[#fff7fb] shadow-sm"
-                : "border-primary/15 bg-white hover:border-primary/40"
-            }`}
-          >
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-sm font-black text-[#444]">
-                  {meta.label} Test
-                  <span className="ml-2 rounded-full bg-primary/10 px-2 py-1 text-[10px] uppercase tracking-[0.18em] text-primary">
-                    {meta.badge}
-                  </span>
-                </p>
-                <p className="mt-1 text-xs font-bold text-[#666]">{meta.purpose}</p>
-              </div>
-              <span className="text-sm font-black text-primary">{meta.questionCount} soal</span>
-            </div>
-            <p className="mt-2 text-sm leading-relaxed text-[#666]">{meta.description}</p>
-          </button>
-        );
-      })}
+    <div className="mt-6 flex flex-wrap gap-2 rounded-2xl bg-gray-50 p-1.5 border border-gray-100">
+      {(["lite", "pro"] as const).map((v) => (
+        <button
+          key={v}
+          onClick={() => {
+            onChange(v);
+            onResetStep();
+          }}
+          className={`flex-1 rounded-xl px-4 py-2 text-xs font-black transition-all active:scale-95 touch-manipulation select-none ${
+            activeVariant === v ? "bg-white text-primary shadow-sm ring-1 ring-primary/20" : "text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+          }`}
+        >
+          {attachmentVariantMeta[v].label}
+        </button>
+      ))}
     </div>
   );
 }
 
 function InstructionPanel({ testVariant }: { testVariant: AttachmentTestVariant }) {
   const meta = attachmentVariantMeta[testVariant];
-
   return (
-    <div className="space-y-5">
-      <div className="rounded-2xl border border-primary/30 bg-white p-5">
-        <p className="text-xs font-black uppercase tracking-[0.18em] text-primary">Posisi Instrumen</p>
-        <p className="mt-2 text-sm leading-relaxed text-[#555]">
-          Instrumen ini dirancang agar kuat secara teori, tetapi belum tervalidasi secara akademik seperti alat
-          penelitian formal. Jadi hasilnya dipakai untuk refleksi diri, bukan sebagai label final atau diagnosis.
+    <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+      <div className="mb-6 rounded-2xl bg-linear-to-br from-primary/5 to-secondary/5 p-6 border border-primary/10">
+        <h4 className="flex items-center gap-2 text-lg font-black text-primary">
+          <ClipboardCheck size={20} />
+          Tentang Refleksi {meta.label}
+        </h4>
+        <p className="mt-3 text-sm leading-relaxed text-[#555]">
+          {meta.purpose} Test ini menggunakan skala 1-5 untuk melihat kecenderunganmu dalam hubungan.
         </p>
       </div>
 
-      <div className="rounded-2xl border border-primary/20 bg-white p-5">
-        <p className="text-xs font-black uppercase tracking-[0.18em] text-primary">Mode Aktif</p>
-        <p className="mt-2 text-sm text-[#555]">
-          <span className="font-black text-primary">{meta.label}</span>: {meta.purpose}. Total {meta.questionCount}{" "}
-          soal dengan fokus pada dua dimensi utama, yaitu attachment anxiety dan attachment avoidance.
-        </p>
-      </div>
-
-      <div className="rounded-2xl border border-primary/20 bg-white p-5">
-        <p className="text-xs font-black uppercase tracking-[0.18em] text-primary">Skala Jawaban</p>
-        <div className="mt-3 grid gap-2 md:grid-cols-5">
-          {scaleOptions.map((option) => (
-            <div key={option.code} className="rounded-xl border border-primary/20 bg-[#fff9fc] p-3">
-              <p className="text-sm font-black text-primary">
-                {option.code} = {option.value}
-              </p>
-              <p className="mt-1 text-xs text-[#666]">{option.label}</p>
-            </div>
-          ))}
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="rounded-2xl border border-blue-100 bg-blue-50/50 p-5">
+           <div className="flex items-center gap-2 mb-2 text-blue-700 font-bold">
+              <Info size={16} />
+              <span className="text-sm">Skala Jawaban</span>
+           </div>
+           <p className="text-xs text-blue-900/70 leading-relaxed">
+             Skala 1 (Sangat Tidak Setuju) hingga 5 (Sangat Setuju).
+           </p>
         </div>
-      </div>
-
-      <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5">
-        <div className="flex items-start gap-2">
-          <AlertTriangle size={16} className="mt-0.5 text-amber-600" />
-          <div>
-            <p className="text-xs font-black uppercase tracking-[0.18em] text-amber-700">
-              Catatan Profesional Penting
-            </p>
-            <p className="mt-1 text-sm leading-relaxed text-amber-800">
-              Hasil tidak langsung dimaksudkan sebagai cap seperti &quot;kamu avoidant&quot;. Bahasa hasil akan dibuat lebih
-              halus, misalnya &quot;kamu cenderung menjaga kemandirian emosional dalam hubungan&quot;.
-            </p>
-          </div>
+        <div className="rounded-2xl border border-amber-100 bg-amber-50/50 p-5">
+           <div className="flex items-center gap-2 mb-2 text-amber-700 font-bold">
+              <AlertCircle size={16} />
+              <span className="text-sm">Kejujuran</span>
+           </div>
+           <p className="text-xs text-amber-900/70 leading-relaxed">
+             Hasil paling akurat didapat dari jawaban yang paling jujur, bukan yang "terlihat baik".
+           </p>
         </div>
       </div>
     </div>
@@ -370,94 +512,43 @@ function QuestionsPanel({
   onPick,
 }: {
   answers: AnswerMap;
-  questions: (typeof attachmentQuestions)[number][];
+  questions: typeof attachmentQuestions;
   testVariant: AttachmentTestVariant;
-  onPick: (questionId: number, value: number) => void;
+  onPick: (id: number, val: number) => void;
 }) {
-  const meta = attachmentVariantMeta[testVariant];
-
+  const safeAnswers = answers || {};
   return (
-    <div className="space-y-6">
-      <p className="text-xs font-black uppercase tracking-[0.18em] text-primary">
-        Mode {meta.label}: {meta.questionCount} soal
-      </p>
-
-      <div className="sticky top-24 z-30 rounded-2xl border border-primary/30 bg-white/95 p-2.5 shadow-md backdrop-blur sm:p-3">
-        <p className="text-[11px] font-black uppercase tracking-[0.16em] text-primary">Panduan Jawaban Cepat</p>
-        <div className="mt-2 flex flex-wrap gap-1 sm:hidden">
-          {scaleOptions.map((option) => (
-            <span
-              key={`guide-mobile-${option.code}`}
-              className="rounded-full border border-primary/20 bg-[#fff9fc] px-2 py-1 text-[11px] font-black text-primary"
-            >
-              {option.code}
+    <div className="space-y-8 animate-in fade-in duration-700">
+      {questions.map((q, idx) => (
+        <div key={q.id} className="group">
+          <div className="flex items-start gap-4">
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-xs font-black text-primary">
+              {idx + 1}
             </span>
-          ))}
-        </div>
-        <p className="mt-2 text-[11px] leading-relaxed text-[#666] sm:hidden">
-          1 paling tidak sesuai, 5 paling sesuai.
-        </p>
-        <div className="mt-2 hidden gap-2 sm:grid sm:grid-cols-5">
-          {scaleOptions.map((option) => (
-            <div key={`guide-${option.code}`} className="rounded-xl border border-primary/20 bg-[#fff9fc] px-2 py-2">
-              <p className="text-xs font-black text-primary">{option.code}</p>
-              <p className="text-[11px] text-[#666]">{option.label}</p>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="space-y-4">
-        {questions.map((question) => (
-          <div key={`${testVariant}-${question.id}`} className="rounded-2xl border border-primary/15 bg-white p-4">
-            <div className="flex items-start justify-between gap-3">
-              <p className="text-sm font-semibold leading-relaxed text-[#4a4a4a]">
-                {question.id}. {question.statement}
-              </p>
-              {question.reverse && (
-                <span className="shrink-0 rounded-full bg-amber-50 px-2 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-amber-700">
-                  Reverse
-                </span>
-              )}
-            </div>
-
-            <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-5">
-              {scaleOptions.map((option) => {
-                const isSelected = answers[question.id] === option.value;
-
-                return (
+            <div className="flex-1">
+              <p className="text-sm font-bold text-[#444] leading-relaxed md:text-base">{q.statement}</p>
+              <div className="mt-5 flex flex-wrap gap-2 md:gap-3">
+                {scaleOptions.map((opt) => (
                   <button
-                    key={`${testVariant}-${question.id}-${option.code}`}
-                    type="button"
-                    onClick={() => onPick(question.id, option.value)}
-                    className={`rounded-xl border px-2 py-2 text-xs font-bold transition ${
-                      isSelected
-                        ? "border-primary bg-primary text-white"
-                        : "border-primary/25 bg-white text-[#666] hover:border-primary/50 hover:bg-primary/5"
+                    key={opt.value}
+                    onClick={() => onPick(q.id, opt.value)}
+                    className={`flex h-12 w-12 md:h-14 md:w-14 items-center justify-center rounded-2xl text-base font-black transition-all active:scale-90 touch-manipulation select-none ${
+                      safeAnswers[q.id] === opt.value
+                        ? "bg-primary text-white scale-110 shadow-lg ring-4 ring-primary/20"
+                        : "bg-white text-gray-500 border-2 border-gray-100 hover:border-primary/30 hover:text-primary hover:bg-primary/5 shadow-sm"
                     }`}
                   >
-                    {option.code}
+                    {opt.value}
                   </button>
-                );
-              })}
+                ))}
+              </div>
             </div>
           </div>
-        ))}
-      </div>
+        </div>
+      ))}
     </div>
   );
 }
-
-type ScoreCard = {
-  dimension: AttachmentDimension;
-  label: string;
-  total: number;
-  answeredItems: number;
-  itemIds: number[];
-  avg: number;
-  pct: number;
-  level: string;
-};
 
 function ResultPanel({
   answeredCount,
@@ -465,20 +556,36 @@ function ResultPanel({
   scoreCards,
   styleResult,
   totalQuestionCount,
+  setShowShareCard,
 }: {
   answeredCount: number;
   testVariant: AttachmentTestVariant;
   scoreCards: ScoreCard[];
   styleResult: (typeof attachmentStyleSummaries)[AttachmentStyle] & { style: AttachmentStyle } | null;
   totalQuestionCount: number;
+  setShowShareCard: (v: boolean) => void;
 }) {
   const meta = attachmentVariantMeta[testVariant];
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 animate-in fade-in duration-1000">
       {styleResult ? (
         <>
-          <div className="rounded-[2rem] border border-primary/25 bg-gradient-to-br from-[#fff7fb] via-white to-[#fff2f8] p-6 shadow-sm">
+          <div className="flex items-center justify-between rounded-2xl border border-primary/20 bg-linear-to-r from-[#fff5fb] to-[#fff0f7] px-4 py-3 relative overflow-hidden group">
+            <div className="relative z-10">
+              <p className="text-xs font-black uppercase tracking-[0.14em] text-primary">Tesmu sudah selesai 🎉</p>
+              <p className="mt-0.5 text-[11px] text-[#888]">Bagikan hasilmu ke Instagram!</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowShareCard(true)}
+              className="btn btn-primary-solid inline-flex items-center gap-2 py-2! text-xs! shadow-md hover:shadow-primary/20 relative z-10"
+            >
+              <Share2 size={13} />
+              Share ke IG
+            </button>
+          </div>
+          <div className="rounded-4xl border border-primary/25 bg-linear-to-br from-[#fff7fb] via-white to-[#fff2f8] p-6 shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <p className="text-xs font-black uppercase tracking-[0.18em] text-primary">Hasil Attachment</p>
@@ -549,7 +656,7 @@ function ResultPanel({
                   Rata-rata dimensi: {card.avg.toFixed(2)} dari 5
                 </p>
                 <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-[#555]">
-                  {attachmentDimensionDescriptions[card.dimension].map((item) => (
+                  {attachmentDimensionDescriptions[card.dimension].map((item: string) => (
                     <li key={item}>{item}</li>
                   ))}
                 </ul>
