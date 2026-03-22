@@ -187,10 +187,11 @@ function PAPinCard({ data, cardRef }: { data: ShareCardData; cardRef: React.RefO
         </div>
 
         {/* ── Two-column or Single-column pills ──────────────── */}
-        <div style={{ display: "grid", gridTemplateColumns: isPortrait ? "1fr" : "1fr 1fr", gap: 12, marginBottom: isPortrait ? 24 : 16 }}>
+        <div style={{ display: "flex", flexDirection: isPortrait ? "column" : "row", gap: 12, marginBottom: isPortrait ? 24 : 16 }}>
           {/* Ciri-ciri */}
           <div
             style={{
+              flex: 1,
               background: "rgba(255,255,255,0.75)",
               border: "1.5px solid rgba(255,175,204,0.25)",
               borderRadius: 18,
@@ -215,6 +216,7 @@ function PAPinCard({ data, cardRef }: { data: ShareCardData; cardRef: React.RefO
           {/* Merasa dicintai / Kelebihan */}
           <div
             style={{
+              flex: 1,
               background: "rgba(255,255,255,0.75)",
               border: "1.5px solid rgba(255,175,204,0.25)",
               borderRadius: 18,
@@ -312,24 +314,23 @@ export default function ShareResultCard({
   onClose: () => void;
 }) {
   const cardRef = useRef<HTMLDivElement | null>(null);
+  const captureRef = useRef<HTMLDivElement | null>(null);
   const [isCapturing, setIsCapturing] = useState(false);
   const [format, setFormat] = useState<"square" | "portrait">("square");
 
   const cardData: ShareCardData = { ...data, format };
 
   async function handleDownload() {
-    if (!cardRef.current) return;
+    if (!captureRef.current) return;
     setIsCapturing(true);
 
     try {
       const html2canvas = (await import("html2canvas")).default;
-      const canvas = await html2canvas(cardRef.current, {
+      const canvas = await html2canvas(captureRef.current, {
         scale: 2.5,
         useCORS: true,
         backgroundColor: null,
         logging: false,
-        width: format === "portrait" ? 420 : 550,
-        height: format === "portrait" ? 746 : 550,
       });
 
       const link = document.createElement("a");
@@ -344,18 +345,16 @@ export default function ShareResultCard({
   }
 
   async function handleShare() {
-    if (!cardRef.current) return;
+    if (!captureRef.current) return;
     setIsCapturing(true);
 
     try {
       const html2canvas = (await import("html2canvas")).default;
-      const canvas = await html2canvas(cardRef.current, {
+      const canvas = await html2canvas(captureRef.current, {
         scale: 2.5,
         useCORS: true,
         backgroundColor: null,
         logging: false,
-        width: format === "portrait" ? 420 : 550,
-        height: format === "portrait" ? 746 : 550,
       });
 
       canvas.toBlob(async (blob) => {
@@ -427,6 +426,11 @@ export default function ShareResultCard({
               <Smartphone size={14} />
               Portrait (Story)
             </button>
+        </div>
+
+        {/* Hidden card purely for html2canvas capturing */}
+        <div style={{ position: "fixed", top: "-9999px", left: "-9999px", pointerEvents: "none" }}>
+          <PAPinCard data={cardData} cardRef={captureRef} />
         </div>
 
         {/* Card preview wrapper with scale to fit smaller screens if needed */}

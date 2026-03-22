@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { useMemo } from "react";
 import { ArrowLeft, Lock, UserPlus, LogIn } from "lucide-react";
-import AttachmentReflectionUI from "@/components/AttachmentReflectionUI";
-import LoveLanguageMappingUI from "@/components/LoveLanguageMappingUI";
+import TestUI from "@/components/TestUI";
+import { attachmentConfig } from "@/data/attachmentConfig";
+import { loveLanguageConfig } from "@/data/loveLanguageConfig";
 import { useTestsCatalog } from "@/hooks/useTestsCatalog";
 import { useAuthSession } from "@/hooks/useAuthSession";
 import { usePathname, useSearchParams } from "next/navigation";
@@ -42,7 +43,9 @@ export default function TestDetailClient({ slug }: { slug: string }) {
     );
   }
 
-  if (!isLoggedIn) {
+  const isLiteTest = slug === "love-language-lite" || slug === "attachment-lite";
+
+  if (!isLoggedIn && !isLiteTest) {
     return (
       <section className="mx-auto w-full max-w-6xl px-4 md:px-8">
         <div className="card-primary p-8 md:p-12 text-center">
@@ -126,19 +129,19 @@ export default function TestDetailClient({ slug }: { slug: string }) {
   }
 
   if (slug === "attachment-lite") {
-    return <AttachmentReflectionUI initialVariant="lite" fixedVariant resultId={resultId || undefined} />;
+    return <TestUI config={attachmentConfig} initialVariant="lite" fixedVariant resultId={resultId || undefined} />;
   }
 
   if (slug === "attachment-pro") {
-    return <AttachmentReflectionUI initialVariant="pro" fixedVariant resultId={resultId || undefined} />;
+    return <TestUI config={attachmentConfig} initialVariant="pro" fixedVariant resultId={resultId || undefined} />;
   }
 
   if (slug === "love-language-lite") {
-    return <LoveLanguageMappingUI initialVariant="lite" fixedVariant resultId={resultId || undefined} />;
+    return <TestUI config={loveLanguageConfig} initialVariant="lite" fixedVariant resultId={resultId || undefined} />;
   }
 
   if (slug === "love-language-pro") {
-    return <LoveLanguageMappingUI initialVariant="pro" fixedVariant resultId={resultId || undefined} />;
+    return <TestUI config={loveLanguageConfig} initialVariant="pro" fixedVariant resultId={resultId || undefined} />;
   }
 
   return (

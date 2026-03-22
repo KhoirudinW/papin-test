@@ -19,6 +19,8 @@ export const metadata: Metadata = {
   applicationName: "PAPin Test Platform",
 };
 
+import { Toaster } from "sonner";
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -27,7 +29,10 @@ export default function RootLayout({
   return (
     <html lang="id">
       <body className={`${poppins.variable} antialiased`}>
-        <AuthProvider>{children}</AuthProvider>
+        <AuthProvider>
+          {children}
+          <Toaster richColors position="top-center" />
+        </AuthProvider>
       </body>
     </html>
   );
